@@ -199,7 +199,7 @@ function render() {
           <div><div class="name">${esc(label(byUser(r.user_id)))} <span class="pill" style="--c:var(--sign)">wants ${esc(r.plan)}</span></div><div class="sub">${when(r.created_at)}${r.note ? ` · ${esc(r.note)}` : ""}</div></div>
           <button class="primary" data-grant>Grant ${esc(r.plan)}</button><button data-dismiss>Dismiss</button></div>`).join("")}</div>
         <div class="list" style="margin-top:10px">${members.map((m) => `<div class="row" style="grid-template-columns:1fr auto auto auto" data-member="${m.id}">
-          <div><div class="name">${esc(m.display_name || m.email?.split("@")[0] || "Rider")} ${m.username ? `<span class="sub">@${esc(m.username)}</span>` : ""}</div><div class="sub">${esc(m.email || "")} · ${m.friends} friends · ${m.drives} drives · ${m.searchable ? "searchable" : "hidden from search"} · ${m.push ? "push on" : "no push"} · ${ago(m.last_seen_at)}</div></div>
+          <div><div class="name">${esc(m.display_name || m.email?.split("@")[0] || "Rider")} ${m.display_name ? "" : `<span class="pill" style="--c:var(--bad)">no display name</span>`}</div><div class="sub">${esc(m.email || "")} · ${m.friends} friends · ${m.drives} drives · ${m.searchable ? "searchable" : "hidden from search"} · ${m.push ? "push on" : "no push"} · ${ago(m.last_seen_at)}</div></div>
           <select data-planpick>${["free", "premium", "club", "rally"].map((p) => `<option${p === m.plan ? " selected" : ""}>${p}</option>`).join("")}</select>
           <button data-planset>Set</button>
           <button data-togglesearch title="Flip whether this member can be found by username">${m.searchable ? "Hide" : "Show"}</button>
