@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joyride Admin</title>
+<!--
+  Joyride admin back end: who's online and what they're doing, rider reports, and a card per rider
+  (profile, drives, friends, their reports). A plain page that talks to Supabase with the public
+  anon key; what it may see is decided by the admins table and is_admin() in
+  pipeline/supabase_migration_admin.sql, so only listed admins get anything back.
+
+  Run it locally:   cd admin && python3 -m http.server 8787   → http://localhost:8787
+  Or host the folder anywhere static (GitHub Pages, Netlify). Fill in config.js first.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root { --bg:#0e1013; --card:#171a20; --field:#22262e; --text:#f6f4ee; --muted:#a7aeb8; --line:rgba(255,255,255,.10); --a:#ff6a3d; --b:#f2336f; --go:#2bd07a; --sign:#ffc81f; --bad:#ff5a4e;
+  --fd:"Barlow Condensed","Arial Narrow",sans-serif; --fb:"Barlow",system-ui,sans-serif; --fm:"JetBrains Mono",ui-monospace,Menlo,monospace; color-scheme:dark; }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 var(--fb); }
+.wrap { max-width:1280px; margin:0 auto; padding:24px 20px 60px; display:grid; gap:20px; }
+header { display:flex; flex-wrap:wrap; align-items:end; justify-content:space-between; gap:12px; }
+.eyebrow { font-family:var(--fd); font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--a); font-size:13px; }
+h1 { font-family:var(--fd); font-weight:800; font-size:40px; line-height:1; margin:0; }
+h2 { font-family:var(--fd); font-weight:700; font-size:20px; letter-spacing:.04em; text-transform:uppercase; margin:0 0 10px; color:var(--muted); }
+.who { color:var(--muted); font-size:13px; display:flex; gap:10px; align-items:center; }
+button, select, input { font:inherit; color:var(--text); }
+button { padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--field); font-weight:600; cursor:pointer; }
+button.primary { background:var(--a); border-color:var(--a); color:#fff; }
+input, select { padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:var(--field); }
+.gate { max-width:420px; margin:80px auto; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; display:grid; gap:10px; }
+.gate h1 { font-size:30px }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+.tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; border-left:4px solid var(--c,var(--a)); }
+.tile .n { font-family:var(--fd); font-weight:800; font-size:40px; line-height:1; font-variant-numeric:tabular-nums; color:var(--c,var(--a)); }
+.tile .l { font-size:12px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; font-weight:700; }
+.grid { display:grid; grid-template-columns:1.1fr 1fr; gap:20px; }
+@media (max-width:900px) { .grid { grid-template-columns:1fr } }
+.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; min-width:0; }
+.list { display:grid; gap:0; }
+.row { display:grid; gap:12px; padding:10px 0; border-top:1px solid var(--line); align-items:center; min-width:0; }
+.row:first-child { border-top:0 }
+.online { grid-template-columns:auto 1fr auto; }
+.dot { width:10px; height:10px; border-radius:50%; background:var(--go); box-shadow:0 0 0 3px rgba(43,208,122,.2); }
+.dot.away { background:var(--muted); box-shadow:none }
+.name { font-weight:700 } .sub { color:var(--muted); font-size:13px } .mono { font-family:var(--fm); font-size:12px; color:var(--muted) }
+.pill { display:inline-block; font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1.5px solid var(--c); color:var(--c); }
+.report { grid-template-columns:1fr; }
+.report .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.report .msg { white-space:pre-wrap; }
+.report .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.report .tools input { flex:1 1 200px }
+.tools { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+.tools input { flex:1 1 220px }
+.user { grid-template-columns:1fr auto; cursor:pointer; }
+.user:hover { background:rgba(255,255,255,.03) }
+.profile { display:grid; gap:14px; }
+.pcard { display:flex; gap:16px; align-items:center; background:var(--field); border-radius:14px; padding:16px; }
+.avatar { width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg,var(--a),var(--b)); display:grid; place-items:center; font-family:var(--fd); font-weight:800; font-size:26px; color:#fff; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:13px; }
+.kv b { color:var(--muted); font-weight:600 }
+.empty { color:var(--muted); padding:14px 0; }
+.err { color:var(--bad); font-size:13px }
+a { color:var(--a) }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ago = (s) => { if (!s) return "never"; const m = (Date.now() - new Date(s)) / 60000; return m < 1 ? "just now" : m < 60 ? `${Math.round(m)} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const when = (s) => s ? new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+const clock = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+const ONLINE_MIN = 5;
+const KIND_C = { bug: "var(--bad)", "road data": "var(--sign)", safety: "var(--b)", idea: "var(--go)", other: "var(--muted)" };
+const STATUS_C = { new: "var(--a)", open: "var(--sign)", done: "var(--go)" };
+const HZ = { police: "🚓", object: "📦", construction: "🚧", pothole: "🕳", crash: "💥", closed: "⛔", animal: "🦌", gravel: "🪨" };
+
+if (!window.JOYRIDE_ADMIN) { $("#app").innerHTML = `<div class="gate"><h1>Joyride Admin</h1><p class="err">admin/config.js is missing. Copy config.example.js to config.js and fill in the project URL and anon key.</p></div>`; throw new Error("no config"); }
+const sb = supabase.createClient(JOYRIDE_ADMIN.url, JOYRIDE_ADMIN.anonKey);
+
+let me = null, profiles = [], reports = [], drives = [], friends = [], hazards = [], roads = [], overview = null, selected = null, q = "";
+let members = [], planReqs = [], clubs = [], rallies = [], threads = [], messages = [], invites = [];
+
+// A password-reset link lands here: supabase-js reads the token from the URL and raises
+// PASSWORD_RECOVERY; the page then asks for the new password instead of showing the admin.
+function recovery() {
+  $("#app").innerHTML = `<div class="gate"><div class="eyebrow">Joyride</div><h1>Choose a new password</h1>
+    <input id="p1" type="password" placeholder="New password (8+ characters)" autocomplete="new-password">
+    <input id="p2" type="password" placeholder="Again" autocomplete="new-password">
+    <button class="primary" id="set">Save password</button><div id="m" class="err"></div></div>`;
+  $("#set").onclick = async () => {
+    const a = $("#p1").value, b = $("#p2").value;
+    if (a.length < 8) return $("#m").textContent = "Use at least 8 characters.";
+    if (a !== b) return $("#m").textContent = "Those don't match.";
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) return $("#m").textContent = error.message;
+    history.replaceState(null, "", location.pathname);
+    const { data } = await sb.auth.getSession(); me = data.session?.user ?? null;
+    await refresh();
+  };
+}
+let recovering = false;
+function gate(msg = "") {
+  $("#app").innerHTML = `<div class="gate">
+    <div class="eyebrow">Joyride</div><h1>Admin sign-in</h1>
+    <p class="sub">Only accounts on the admins list get anything back.</p>
+    <button class="primary" id="g">Continue with Google</button>
+    <div class="sub" style="text-align:center">or</div>
+    <input id="e" type="email" placeholder="Email"><input id="p" type="password" placeholder="Password">
+    <button id="s">Sign in</button>${msg ? `<div class="err">${esc(msg)}</div>` : ""}</div>`;
+  $("#g").onclick = () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.href.split("#")[0] } });
+  $("#s").onclick = async () => { const { error } = await sb.auth.signInWithPassword({ email: $("#e").value, password: $("#p").value }); if (error) gate(error.message); };
+}
+
+async function load() {
+  const [o, p, r, d, f, hz, rd] = await Promise.all([
+    sb.rpc("admin_overview"),
+    sb.from("profiles").select("*").order("last_seen_at", { ascending: false, nullsFirst: false }),
+    sb.from("reports").select("*").order("created_at", { ascending: false }).limit(500),
+    sb.from("drives").select("*").order("at", { ascending: false }).limit(2000),
+    sb.from("friends").select("*"),
+    sb.from("hazards").select("*").gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(300),
+    sb.from("roads").select("id, name, rider_stars, rider_count, curvature, state").gt("rider_count", 0).order("rider_count", { ascending: false }).limit(300),
+  ]);
+  const [mb, pr, cl, ra, th, ms, iv] = await Promise.all([
+    sb.rpc("admin_members"),
+    sb.from("plan_requests").select("*").order("created_at", { ascending: false }).limit(200),
+    sb.from("clubs").select("*").order("created_at", { ascending: false }),
+    sb.from("rallies").select("*").order("created_at", { ascending: false }),
+    sb.from("threads").select("*").order("created_at", { ascending: false }).limit(300),
+    sb.from("messages").select("*").order("created_at", { ascending: false }).limit(400),
+    sb.from("invites").select("*").order("created_at", { ascending: false }).limit(200),
+  ]);
+  members = mb.data ?? []; planReqs = pr.data ?? []; clubs = cl.data ?? []; rallies = ra.data ?? []; threads = th.data ?? []; messages = ms.data ?? []; invites = iv.data ?? [];
+  if (o.error || !o.data) { gate("This account isn't on the admins list (or the admin migration hasn't been run)."); await sb.auth.signOut(); return false; }
+  overview = o.data; profiles = p.data ?? []; reports = r.data ?? []; drives = d.data ?? []; friends = f.data ?? []; hazards = hz.data ?? []; roads = rd.data ?? [];
+  return true;
+}
+
+function render() {
+  const online = profiles.filter((p) => p.last_seen_at && Date.now() - new Date(p.last_seen_at) < ONLINE_MIN * 60000);
+  const byUser = (id) => profiles.find((p) => p.id === id);
+  const label = (p) => p?.display_name || p?.email?.split("@")[0] || "Rider";
+  const tiles = [["Online now", overview.online, "var(--go)"], ["Driving now", overview.driving_now, "var(--a)"], ["Seen today", overview.today, "var(--sign)"], ["Riders", overview.riders, "var(--text)"], ["New reports", overview.new_reports, "var(--b)"], ["Drives today", overview.drives_today, "var(--go)"], ["Drives total", overview.drives, "var(--muted)"]];
+  const shownUsers = profiles.filter((p) => !q || [p.display_name, p.email, p.car, p.driving_style, p.activity].join(" ").toLowerCase().includes(q));
+  const sel = selected ? byUser(selected) : null;
+  const selDrives = sel ? drives.filter((d) => d.user_id === sel.id) : [];
+  const selFriends = sel ? friends.filter((f) => f.user_id === sel.id || f.friend_id === sel.id) : [];
+  const selReports = sel ? reports.filter((r) => r.user_id === sel.id) : [];
+
+  $("#app").innerHTML = `<div class="wrap">
+    <header><div><div class="eyebrow">Joyride · back office</div><h1>Admin</h1></div>
+      <div class="who">${esc(me.email)} · <button id="refresh">Refresh</button> <button id="out">Sign out</button></div></header>
+    <section class="tiles">${tiles.map(([l, n, c]) => `<div class="tile" style="--c:${c}"><div class="n">${n ?? 0}</div><div class="l">${l}</div></div>`).join("")}</section>
+    <div class="grid">
+      <div class="card"><h2>Online now · what they're doing</h2><div class="list">
+        ${online.length ? online.map((p) => `<div class="row online"><div class="dot"></div><div><div class="name">${esc(label(p))}</div><div class="sub">${esc(p.activity || "in the app")}${p.last_lat != null ? ` · near ${p.last_lat.toFixed(2)}, ${p.last_lon.toFixed(2)}` : ""}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") : `<div class="empty">Nobody in the app right now. Presence updates once a minute while the app is open.</div>`}
+      </div></div>
+      <div class="card"><h2>Reports</h2><div class="list">
+        ${reports.length ? reports.map((r) => `<div class="row report" data-id="${r.id}">
+          <div class="head"><span class="pill" style="--c:${KIND_C[r.kind] || "var(--muted)"}">${esc(r.kind)}</span><span class="pill" style="--c:${STATUS_C[r.status]}">${esc(r.status)}</span>
+            <span class="name">${esc(label(byUser(r.user_id)) )}</span><span class="mono">${when(r.created_at)}</span>${r.road_name ? `<span class="sub">about ${esc(r.road_name)}</span>` : ""}</div>
+          <div class="msg">${esc(r.message)}</div>
+          <div class="sub">${esc(r.context?.screen || "")}${r.context?.near ? ` · near ${r.context.near.lat}, ${r.context.near.lon}` : ""}${r.context?.platform ? ` · ${esc(r.context.platform)}` : ""} · <a href="mailto:${esc(r.email)}">${esc(r.email)}</a></div>
+          <div class="tools"><select data-status>${["new", "open", "done"].map((s) => `<option${s === r.status ? " selected" : ""}>${s}</option>`).join("")}</select><input data-note placeholder="Admin note" value="${esc(r.admin_note || "")}"><button data-save>Save</button></div>
+        </div>`).join("") : `<div class="empty">No reports yet.</div>`}
+      </div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Hazard reports · live (${hazards.length})</h2><div class="list">
+        ${hazards.length ? hazards.map((h) => `<div class="row" style="grid-template-columns:auto 1fr auto auto" data-hz="${h.id}">
+          <span style="font-size:22px">${HZ[h.kind] || "⚠️"}</span>
+          <div><div class="name">${esc(h.kind)}</div><div class="sub">${esc(label(byUser(h.user_id)))} · ${when(h.created_at)} · expires ${when(h.expires_at)} · <a href="https://www.google.com/maps?q=${h.lat},${h.lon}" target="_blank" rel="noopener">${h.lat.toFixed(4)}, ${h.lon.toFixed(4)}</a></div></div>
+          <span class="mono">${ago(h.created_at)}</span>
+          <button data-hzdel>Remove</button>
+        </div>`).join("") : `<div class="empty">No live hazard reports.</div>`}
+      </div></div>
+      <div class="card"><h2>Road ratings · most rated first</h2><div class="list">
+        ${roads.length ? roads.map((r) => `<div class="row" style="grid-template-columns:1fr auto auto auto auto" data-road="${r.id}">
+          <div><div class="name">${esc(r.name || "(unnamed)")}</div><div class="sub">#${r.id} · ${esc(r.state || "")} · curvature ${r.curvature ?? ""}</div></div>
+          <span class="name" style="color:var(--sign)">★ ${Number(r.rider_stars).toFixed(1)} <span class="sub">(${r.rider_count})</span></span>
+          <input data-stars type="number" min="0" max="5" step="0.1" value="${Number(r.rider_stars).toFixed(1)}" style="width:70px" title="Stars">
+          <input data-count type="number" min="0" step="1" value="${r.rider_count}" style="width:70px" title="Count">
+          <button data-roadsave>Save</button>
+        </div>`).join("") : `<div class="empty">No rated roads yet.</div>`}
+      </div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Squad · members &amp; plans</h2>
+        <div class="sub" style="margin-bottom:8px">Plans set the squad size: free 3 · premium 10 · club 30 · rally 50. New plan requests: <b style="color:var(--a)">${planReqs.filter((r) => r.status === "new").length}</b></div>
+        <div class="list">${planReqs.filter((r) => r.status === "new").map((r) => `<div class="row" style="grid-template-columns:1fr auto auto" data-pr="${r.id}" data-user="${r.user_id}" data-plan="${esc(r.plan)}">
+          <div><div class="name">${esc(label(byUser(r.user_id)))} <span class="pill" style="--c:var(--sign)">wants ${esc(r.plan)}</span></div><div class="sub">${when(r.created_at)}${r.note ? ` · ${esc(r.note)}` : ""}</div></div>
+          <button class="primary" data-grant>Grant ${esc(r.plan)}</button><button data-dismiss>Dismiss</button></div>`).join("")}</div>
+        <div class="list" style="margin-top:10px">${members.map((m) => `<div class="row" style="grid-template-columns:1fr auto auto auto" data-member="${m.id}">
+          <div><div class="name">${esc(m.display_name || m.email?.split("@")[0] || "Rider")} ${m.username ? `<span class="sub">@${esc(m.username)}</span>` : ""}</div><div class="sub">${esc(m.email || "")} · ${m.friends} friends · ${m.drives} drives · ${m.searchable ? "searchable" : "hidden from search"} · ${m.push ? "push on" : "no push"} · ${ago(m.last_seen_at)}</div></div>
+          <select data-planpick>${["free", "premium", "club", "rally"].map((p) => `<option${p === m.plan ? " selected" : ""}>${p}</option>`).join("")}</select>
+          <button data-planset>Set</button>
+          <button data-togglesearch title="Flip whether this member can be found by username">${m.searchable ? "Hide" : "Show"}</button>
+        </div>`).join("")}</div>
+      </div>
+      <div class="card"><h2>Squad · clubs, rallies &amp; invites</h2>
+        <div class="list">${clubs.map((c) => `<div class="row" style="grid-template-columns:auto 1fr"><span style="font-size:22px">${esc(c.logo || "🏁")}</span><div><div class="name">${esc(c.name)} <span class="sub">@${esc(c.slug)}</span></div><div class="sub">owner ${esc(label(byUser(c.owner)))} · ${when(c.created_at)}${c.about ? ` · ${esc(c.about)}` : ""}</div></div></div>`).join("") || `<div class="empty">No clubs yet.</div>`}</div>
+        <div class="list" style="margin-top:10px">${rallies.map((r) => `<div class="row" style="grid-template-columns:auto 1fr"><span style="font-size:22px">🚗</span><div><div class="name">${esc(r.name)}</div><div class="sub">manager ${esc(label(byUser(r.owner)))} · ${when(r.created_at)}${r.about ? ` · ${esc(r.about)}` : ""}</div></div></div>`).join("") || `<div class="empty">No rallies yet.</div>`}</div>
+        <div class="list" style="margin-top:10px">${invites.slice(0, 30).map((i) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(i.email)}</div><div class="sub">invited by ${esc(label(byUser(i.from_user)))} · ${when(i.created_at)}</div></div><span class="pill" style="--c:${i.status === "accepted" ? "var(--go)" : "var(--muted)"}">${esc(i.status)}</span></div>`).join("") || `<div class="empty">No email invites yet.</div>`}</div>
+      </div>
+    </div>
+    <div class="card"><h2>Squad · chats (latest ${messages.length} messages)</h2>
+      <div class="list">${messages.map((m) => { const t = threads.find((x) => x.id === m.thread_id); return `<div class="row" style="grid-template-columns:1fr auto auto" data-msg="${m.id}">
+        <div><div class="name">${esc(label(byUser(m.user_id)))} <span class="pill" style="--c:${m.kind === "route" ? "var(--a)" : m.kind === "challenge" ? "var(--sign)" : m.kind === "result" ? "var(--go)" : "var(--muted)"}">${esc(m.kind)}</span> <span class="sub">in ${esc(t?.name || (t?.kind === "dm" ? "a 1:1 chat" : `thread #${m.thread_id}`))}</span></div><div class="msg">${esc(m.body)}</div></div>
+        <span class="mono">${when(m.created_at)}</span><button data-msgdel>Remove</button></div>`; }).join("") || `<div class="empty">No messages yet.</div>`}</div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Riders</h2>
+        <div class="tools"><input id="q" placeholder="Search name, email, car, style" value="${esc(q)}"></div>
+        <div class="list">${shownUsers.map((p) => `<div class="row user" data-u="${p.id}"><div><div class="name">${esc(label(p))} <span class="sub">${esc(p.email || "")}</span></div><div class="sub">${[p.car, p.driving_style, p.activity].filter(Boolean).map(esc).join(" · ")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") || `<div class="empty">No riders yet.</div>`}</div>
+      </div>
+      <div class="card"><h2>Rider card</h2>${sel ? `<div class="profile">
+        <div class="pcard"><div class="avatar">${esc(label(sel).slice(0, 1).toUpperCase())}</div><div><div class="name" style="font-size:20px">${esc(label(sel))}</div><div class="sub">${esc(sel.email || "")}</div><div class="sub">${[sel.car, sel.driving_style].filter(Boolean).map(esc).join(" · ") || "Profile not finished"}</div></div></div>
+        <div class="kv"><b>Last seen</b><span>${ago(sel.last_seen_at)}${sel.activity ? ` · ${esc(sel.activity)}` : ""}</span><b>Avatar</b><span>${esc(sel.avatar?.look || sel.avatar?.preset || "custom")}</span><b>Shares drives</b><span>${sel.share_drives ? "yes" : "no"}</span><b>Shares presence</b><span>${sel.share_presence ? "yes" : "no"}</span><b>Terms</b><span>${sel.terms_version ? `v${sel.terms_version} · ${when(sel.consented_at)}` : "not accepted"}</span><b>App</b><span>${esc(sel.app_version || "")}</span><b>Profile updated</b><span>${when(sel.updated_at)}</span></div>
+        <div><h2>Drives (${selDrives.length})</h2><div class="list">${selDrives.slice(0, 40).map((d) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(d.road_name || d.road_id)}</div><div class="sub">${when(d.at)}</div></div><div class="mono">${d.miles} mi · ${clock(d.seconds)}${d.max_g ? ` · ${d.max_g} g` : ""}</div></div>`).join("") || `<div class="empty">No drives synced.</div>`}</div></div>
+        <div><h2>Friends (${selFriends.length})</h2><div class="list">${selFriends.map((f) => { const o = byUser(f.user_id === sel.id ? f.friend_id : f.user_id); return `<div class="row" style="grid-template-columns:1fr auto"><div class="name">${esc(label(o))}</div><span class="pill" style="--c:${f.status === "accepted" ? "var(--go)" : "var(--muted)"}">${esc(f.status)}</span></div>`; }).join("") || `<div class="empty">No friends yet.</div>`}</div></div>
+        <div><h2>Their reports (${selReports.length})</h2><div class="list">${selReports.map((r) => `<div class="row" style="grid-template-columns:1fr"><div class="sub">${esc(r.kind)} · ${when(r.created_at)} · ${esc(r.status)}</div><div>${esc(r.message)}</div></div>`).join("") || `<div class="empty">None.</div>`}</div></div>
+      </div>` : `<div class="empty">Pick a rider on the left.</div>`}</div>
+    </div>
+  </div>`;
+  $("#refresh").onclick = refresh;
+  $("#out").onclick = async () => { await sb.auth.signOut(); gate(); };
+  $("#q").oninput = (e) => { q = e.target.value.trim().toLowerCase(); render(); $("#q").focus(); $("#q").setSelectionRange(q.length, q.length); };
+  document.querySelectorAll(".user").forEach((el) => el.onclick = () => { selected = el.dataset.u; render(); });
+  document.querySelectorAll("[data-hzdel]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-hz]"); b.disabled = true;
+    const { error } = await sb.from("hazards").delete().eq("id", row.dataset.hz);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-roadsave]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-road]"); b.disabled = true;
+    const stars = Number(row.querySelector("[data-stars]").value), count = Number(row.querySelector("[data-count]").value);
+    const { error } = await sb.from("roads").update({ rider_stars: stars, rider_count: count }).eq("id", row.dataset.road);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-grant]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-pr]"); b.disabled = true;
+    const { error } = await sb.rpc("admin_set_plan", { p_user: row.dataset.user, p_plan: row.dataset.plan });
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-dismiss]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-pr]"); b.disabled = true;
+    const { error } = await sb.from("plan_requests").update({ status: "dismissed" }).eq("id", row.dataset.pr);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-planset]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-member]"); b.disabled = true;
+    const { error } = await sb.rpc("admin_set_plan", { p_user: row.dataset.member, p_plan: row.querySelector("[data-planpick]").value });
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-togglesearch]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-member]"); b.disabled = true;
+    const m = members.find((x) => x.id === row.dataset.member);
+    const { error } = await sb.from("profiles").update({ searchable: !m.searchable }).eq("id", m.id);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-msgdel]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-msg]"); b.disabled = true;
+    const { error } = await sb.from("messages").delete().eq("id", row.dataset.msg);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll(".report [data-save]").forEach((b) => b.onclick = async () => {
+    const row = b.closest(".report"); b.disabled = true;
+    const { error } = await sb.from("reports").update({ status: row.querySelector("[data-status]").value, admin_note: row.querySelector("[data-note]").value || null }).eq("id", row.dataset.id);
+    if (error) alert(error.message); await refresh();
+  });
+}
+
+async function refresh() { if (await load()) render(); }
+
+(async () => {
+  if (/type=recovery/.test(location.hash)) { recovering = true; return; } // onAuthStateChange takes over
+  const { data } = await sb.auth.getSession();
+  me = data.session?.user ?? null;
+  if (!me) return gate();
+  await refresh();
+  setInterval(refresh, 60000);
+})();
+sb.auth.onAuthStateChange(async (e, s) => {
+  if (e === "PASSWORD_RECOVERY") { recovering = true; me = s?.user ?? null; recovery(); return; }
+  if (s?.user && !me && !recovering) { me = s.user; await refresh(); }
+});
+</script>
+</body>
+</html>

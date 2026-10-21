@@ -1,0 +1,1 @@
+window.JOYRIDE_ADMIN = { url: "https://xyzsxcvqmrqvqcolutev.supabase.co", anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5enN4Y3ZxbXJxdnFjb2x1dGV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NjY3MjUsImV4cCI6MjEwNzM0MjcyNX0.d414rmY3AaOjt1Epq7LEgevats6fEmrt-65cZ-z88BE" };
