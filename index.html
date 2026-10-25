@@ -13,11 +13,10 @@
   Run it locally:   cd admin && python3 -m http.server 8787   → http://localhost:8787
   Or host the folder anywhere static (GitHub Pages, Netlify). Fill in config.js first.
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<!-- Fonts are system fonts on purpose: nothing is loaded from a third-party server (see docs/COMPLIANCE.md). -->
 <style>
 :root { --bg:#0e1013; --card:#171a20; --field:#22262e; --text:#f6f4ee; --muted:#a7aeb8; --line:rgba(255,255,255,.10); --a:#ff6a3d; --b:#f2336f; --go:#2bd07a; --sign:#ffc81f; --bad:#ff5a4e;
-  --fd:"Barlow Condensed","Arial Narrow",sans-serif; --fb:"Barlow",system-ui,sans-serif; --fm:"JetBrains Mono",ui-monospace,Menlo,monospace; color-scheme:dark; }
+  --fd:"Avenir Next Condensed","Arial Narrow",system-ui,sans-serif; --fb:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --fm:ui-monospace,Menlo,Consolas,monospace; color-scheme:dark; }
 * { box-sizing:border-box }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 var(--fb); }
 .wrap { max-width:1280px; margin:0 auto; padding:24px 20px 60px; display:grid; gap:20px; }
