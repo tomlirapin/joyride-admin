@@ -88,6 +88,16 @@ let me = null, profiles = [], reports = [], drives = [], friends = [], hazards =
 let areas = [], liveRides = [];
 let members = [], planReqs = [], clubs = [], rallies = [], threads = [], messages = [], invites = [];
 
+// Bot check (Cloudflare Turnstile) on password sign-in, once a site key is in config.js and CAPTCHA
+// is on in Supabase Auth. Each token works once; the gate redraws (and makes a new one) after a try.
+const TS_KEY = window.JOYRIDE_ADMIN.turnstileSiteKey || "";
+let tsToken = "";
+function mountTurnstile() {
+  const draw = () => window.turnstile.render("#ts", { sitekey: TS_KEY, callback: (t) => { tsToken = t; } });
+  if (window.turnstile) return draw();
+  const sc = document.createElement("script"); sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js"; sc.onload = draw; document.head.appendChild(sc);
+}
+
 // A password-reset link lands here: supabase-js reads the token from the URL and raises
 // PASSWORD_RECOVERY; the page then asks for the new password instead of showing the admin.
 function recovery() {
@@ -114,9 +124,13 @@ function gate(msg = "") {
     <button class="primary" id="g">Continue with Google</button>
     <div class="sub" style="text-align:center">or</div>
     <input id="e" type="email" placeholder="Email"><input id="p" type="password" placeholder="Password">
-    <button id="s">Sign in</button>${msg ? `<div class="err">${esc(msg)}</div>` : ""}</div>`;
+    ${TS_KEY ? '<div id="ts"></div>' : ""}<button id="s">Sign in</button>${msg ? `<div class="err">${esc(msg)}</div>` : ""}</div>`;
+  if (TS_KEY) mountTurnstile();
   $("#g").onclick = () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.href.split("#")[0] } });
-  $("#s").onclick = async () => { const { error } = await sb.auth.signInWithPassword({ email: $("#e").value, password: $("#p").value }); if (error) gate(error.message); };
+  $("#s").onclick = async () => {
+    const { error } = await sb.auth.signInWithPassword({ email: $("#e").value, password: $("#p").value, options: TS_KEY ? { captchaToken: tsToken } : {} });
+    if (error) gate(error.message);
+  };
 }
 
 async function load() {
