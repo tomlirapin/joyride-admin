@@ -49,6 +49,8 @@ input, select { padding:9px 11px; border:1px solid var(--line); border-radius:8p
 .report { grid-template-columns:1fr; }
 .report .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .report .msg { white-space:pre-wrap; }
+.report .shots { display:flex; gap:8px; flex-wrap:wrap; }
+.report .shots img { height:180px; max-width:100%; border-radius:8px; border:1px solid var(--line, #333); display:block; }
 .report .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .report .tools input { flex:1 1 200px }
 .tools { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
@@ -84,6 +86,7 @@ const HZ = { police: "🚓", object: "📦", construction: "🚧", pothole: "�
 if (!window.JOYRIDE_ADMIN) { $("#app").innerHTML = `<div class="gate"><h1>Joyride Admin</h1><p class="err">admin/config.js is missing. Copy config.example.js to config.js and fill in the project URL and anon key.</p></div>`; throw new Error("no config"); }
 const sb = supabase.createClient(JOYRIDE_ADMIN.url, JOYRIDE_ADMIN.anonKey);
 
+let shotUrls = {};
 let me = null, profiles = [], reports = [], drives = [], friends = [], hazards = [], roads = [], overview = null, selected = null, q = "";
 let areas = [], liveRides = [];
 let members = [], planReqs = [], clubs = [], rallies = [], threads = [], messages = [], invites = [];
@@ -157,6 +160,12 @@ async function load() {
   areas = ac.data ?? []; liveRides = lr.data ?? [];
   members = mb.data ?? []; planReqs = pr.data ?? []; clubs = cl.data ?? []; rallies = ra.data ?? []; threads = th.data ?? []; messages = ms.data ?? []; invites = iv.data ?? [];
   if (o.error || !o.data) { gate("This account isn't on the admins list (or the admin migration hasn't been run)."); await sb.auth.signOut(); return false; }
+  // screenshots riders attached: private files, opened here with links that last an hour
+  const shotPaths = (r.data ?? []).flatMap((x) => x.screenshots ?? []);
+  if (shotPaths.length) {
+    const { data: su } = await sb.storage.from("report-shots").createSignedUrls(shotPaths, 3600);
+    shotUrls = Object.fromEntries((su ?? []).filter((x) => x.signedUrl).map((x) => [x.path, x.signedUrl]));
+  }
   overview = o.data; profiles = p.data ?? []; reports = r.data ?? []; drives = d.data ?? []; friends = f.data ?? []; hazards = hz.data ?? []; roads = rd.data ?? [];
   return true;
 }
@@ -202,6 +211,7 @@ function render() {
           <div class="head"><span class="pill" style="--c:${KIND_C[r.kind] || "var(--muted)"}">${esc(r.kind)}</span><span class="pill" style="--c:${STATUS_C[r.status]}">${esc(r.status)}</span>
             <span class="name">${esc(label(byUser(r.user_id)) )}</span><span class="mono">${when(r.created_at)}</span>${r.road_name ? `<span class="sub">about ${esc(r.road_name)}</span>` : ""}</div>
           <div class="msg">${esc(r.message)}</div>
+          ${(r.screenshots ?? []).length ? `<div class="shots">${r.screenshots.map((p, i) => shotUrls[p] ? `<a href="${esc(shotUrls[p])}" target="_blank" rel="noopener"><img src="${esc(shotUrls[p])}" alt="Screenshot ${i + 1}"></a>` : `<span class="sub">screenshot ${i + 1} unavailable</span>`).join("")}</div>` : ""}
           <div class="sub">${esc(r.context?.screen || "")}${r.context?.near ? ` · near ${r.context.near.lat}, ${r.context.near.lon}` : ""}${r.context?.platform ? ` · ${esc(r.context.platform)}` : ""} · <a href="mailto:${esc(r.email)}">${esc(r.email)}</a></div>
           <div class="tools"><select data-status>${["new", "open", "done"].map((s) => `<option${s === r.status ? " selected" : ""}>${s}</option>`).join("")}</select><input data-note placeholder="Admin note" value="${esc(r.admin_note || "")}"><button data-save>Save</button></div>
         </div>`).join("") : `<div class="empty">No reports yet.</div>`}
@@ -357,11 +367,12 @@ async function refresh() { if (!stepped) { stepped = await secondStep(); if (!st
   await refresh();
   setInterval(refresh, 60000);
 })();
-sb.auth.onAuthStateChange(async (e, s) => {
+// Supabase calls made inside this listener wait on the sign-in itself and hang, so the work runs just after
+sb.auth.onAuthStateChange((e, s) => setTimeout(async () => {
   if (e === "SIGNED_OUT") stepped = false;
   if (e === "PASSWORD_RECOVERY") { recovering = true; me = s?.user ?? null; recovery(); return; }
   if (s?.user && !me && !recovering) { me = s.user; await refresh(); }
-});
+}, 0));
 </script>
 </body>
 </html>
