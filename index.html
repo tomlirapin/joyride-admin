@@ -85,6 +85,7 @@ if (!window.JOYRIDE_ADMIN) { $("#app").innerHTML = `<div class="gate"><h1>Joyrid
 const sb = supabase.createClient(JOYRIDE_ADMIN.url, JOYRIDE_ADMIN.anonKey);
 
 let me = null, profiles = [], reports = [], drives = [], friends = [], hazards = [], roads = [], overview = null, selected = null, q = "";
+let areas = [], liveRides = [];
 let members = [], planReqs = [], clubs = [], rallies = [], threads = [], messages = [], invites = [];
 
 // A password-reset link lands here: supabase-js reads the token from the URL and raises
@@ -137,10 +138,21 @@ async function load() {
     sb.from("messages").select("*").order("created_at", { ascending: false }).limit(400),
     sb.from("invites").select("*").order("created_at", { ascending: false }).limit(200),
   ]);
+  // safe summaries only: riders by area (no names, small areas hidden) and live Joyride 2GTHR rides
+  const [ac, lr] = await Promise.all([sb.rpc("admin_area_counts", { p_days: 30 }), sb.rpc("admin_live_rides")]);
+  areas = ac.data ?? []; liveRides = lr.data ?? [];
   members = mb.data ?? []; planReqs = pr.data ?? []; clubs = cl.data ?? []; rallies = ra.data ?? []; threads = th.data ?? []; messages = ms.data ?? []; invites = iv.data ?? [];
   if (o.error || !o.data) { gate("This account isn't on the admins list (or the admin migration hasn't been run)."); await sb.auth.signOut(); return false; }
   overview = o.data; profiles = p.data ?? []; reports = r.data ?? []; drives = d.data ?? []; friends = f.data ?? []; hazards = hz.data ?? []; roads = rd.data ?? [];
   return true;
+}
+
+// a plain dot map of the areas over Michigan's outline box (no basemap, nothing precise)
+function areaMap() {
+  if (!areas.length) return "";
+  const W = 320, H = 360, la0 = 41.6, la1 = 47.6, lo0 = -90.6, lo1 = -82.2, max = Math.max(...areas.map((a) => a.riders));
+  const x = (lo) => ((lo - lo0) / (lo1 - lo0)) * W, y = (la) => H - ((la - la0) / (la1 - la0)) * H;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:360px;background:var(--field,#f4ebd8);border-radius:12px;margin:8px 0">${areas.map((a) => `<circle cx="${x(a.lon).toFixed(1)}" cy="${y(a.lat).toFixed(1)}" r="${(4 + 14 * Math.sqrt(a.riders / max)).toFixed(1)}" fill="#BC5238" fill-opacity="0.55"><title>${a.riders} riders</title></circle>`).join("")}</svg>`;
 }
 
 function render() {
@@ -160,8 +172,17 @@ function render() {
     <section class="tiles">${tiles.map(([l, n, c]) => `<div class="tile" style="--c:${c}"><div class="n">${n ?? 0}</div><div class="l">${l}</div></div>`).join("")}</section>
     <div class="grid">
       <div class="card"><h2>Online now · what they're doing</h2><div class="list">
-        ${online.length ? online.map((p) => `<div class="row online"><div class="dot"></div><div><div class="name">${esc(label(p))}</div><div class="sub">${esc(p.activity || "in the app")}${p.last_lat != null ? ` · near ${p.last_lat.toFixed(2)}, ${p.last_lon.toFixed(2)}` : ""}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") : `<div class="empty">Nobody in the app right now. Presence updates once a minute while the app is open.</div>`}
+        ${online.length ? online.map((p) => `<div class="row online"><div class="dot"></div><div><div class="name">${esc(label(p))}</div><div class="sub">${esc(p.activity || "in the app")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") : `<div class="empty">Nobody in the app right now. Presence updates once a minute while the app is open.</div>`}
       </div></div>
+      <div class="card"><h2>Riders by area · last 30 days</h2>
+        <div class="sub">No names. Each dot is an area about 17 miles across; areas with fewer than 3 riders are hidden. There is no precise location of anyone.</div>
+        ${areaMap()}
+        <div class="list">${areas.length ? areas.slice(0, 30).map((a) => `<div class="row" style="grid-template-columns:1fr auto"><div class="name">Around ${a.lat.toFixed(2)}°N, ${Math.abs(a.lon).toFixed(2)}°W</div><div class="sub">${a.riders} riders</div></div>`).join("") : '<div class="sub">Not enough riders in any one area yet.</div>'}</div>
+      </div>
+      <div class="card"><h2>Joyride 2GTHR · live rides (${liveRides.length})</h2>
+        <div class="sub">Riders in these rides agreed to share with each other. Shown here: counts and a rough area (about 7 miles), never exact spots.</div>
+        <div class="list">${liveRides.length ? liveRides.map((r) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(r.name)}</div><div class="sub">led by ${esc(r.leader)} · ${r.riding} riding${r.waiting ? ` · ${r.waiting} invited` : ""} · ends ${new Date(r.ends_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div></div><div class="sub">${r.area_lat != null ? `near ${r.area_lat.toFixed(1)}, ${r.area_lon.toFixed(1)}` : "no spots yet"}</div></div>`).join("") : '<div class="sub">No rides right now.</div>'}</div>
+      </div>
       <div class="card"><h2>Reports</h2><div class="list">
         ${reports.length ? reports.map((r) => `<div class="row report" data-id="${r.id}">
           <div class="head"><span class="pill" style="--c:${KIND_C[r.kind] || "var(--muted)"}">${esc(r.kind)}</span><span class="pill" style="--c:${STATUS_C[r.status]}">${esc(r.status)}</span>
