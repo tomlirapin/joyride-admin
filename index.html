@@ -340,11 +340,13 @@ async function secondStep() {
   return new Promise((done) => {
     $("#app").innerHTML = `<div class="gate"><div class="eyebrow">Joyride</div><h1>${qr ? "Set up your code" : "Enter your code"}</h1>
       ${qr ? `<p class="sub">Scan this with an authenticator app (Google Authenticator, 1Password or Authy), then type the 6-digit code it shows.</p>
-        <img src="${qr}" alt="QR code for Joyride Admin" style="width:200px;height:200px;background:#fff;border-radius:12px;padding:8px;align-self:center">
+        <img id="qr" alt="QR code for Joyride Admin" style="width:200px;height:200px;background:#fff;border-radius:12px;padding:8px;align-self:center">
         <p class="sub">Can't scan? Enter this key: <code style="user-select:all">${esc(secret)}</code></p>`
         : `<p class="sub">Open your authenticator app and type the 6-digit code for Joyride Admin.</p>`}
       <input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
       <button class="primary" id="v">Continue</button><button id="o">Sign out</button><div id="m" class="err"></div></div>`;
+    // the QR comes as an SVG data URL full of quotes: set it on the image directly, never inside the HTML
+    if (qr) $("#qr").src = qr.startsWith("data:") ? qr : "data:image/svg+xml;utf8," + encodeURIComponent(qr);
     $("#o").onclick = async () => { await sb.auth.signOut(); me = null; gate(); done(false); };
     const go = async () => {
       const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $("#c").value.trim() });
