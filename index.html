@@ -86,7 +86,10 @@ const HZ = { police: "🚓", object: "📦", construction: "🚧", pothole: "�
 if (!window.JOYRIDE_ADMIN) { $("#app").innerHTML = `<div class="gate"><h1>Joyride Admin</h1><p class="err">admin/config.js is missing. Copy config.example.js to config.js and fill in the project URL and anon key.</p></div>`; throw new Error("no config"); }
 const sb = supabase.createClient(JOYRIDE_ADMIN.url, JOYRIDE_ADMIN.anonKey);
 
-let shotUrls = {};
+let shotUrls = {}, riderMiles = {};
+const device = (p) => (p.platform === "ios" ? "iPhone" : p.platform === "android" ? "Android" : "");
+const milesOf = (id) => riderMiles[id]?.miles ?? 0;
+const fmtMi = (m) => (m >= 100 ? Math.round(m).toLocaleString() : m.toFixed(1));
 let me = null, profiles = [], reports = [], drives = [], friends = [], hazards = [], roads = [], overview = null, selected = null, q = "";
 let areas = [], liveRides = [];
 let members = [], planReqs = [], clubs = [], rallies = [], threads = [], messages = [], invites = [];
@@ -156,8 +159,9 @@ async function load() {
     sb.from("invites").select("*").order("created_at", { ascending: false }).limit(200),
   ]);
   // safe summaries only: riders by area (no names, small areas hidden) and live Joyride 2GTHR rides
-  const [ac, lr] = await Promise.all([sb.rpc("admin_area_counts", { p_days: 30 }), sb.rpc("admin_live_rides")]);
+  const [ac, lr, rm] = await Promise.all([sb.rpc("admin_area_counts", { p_days: 30 }), sb.rpc("admin_live_rides"), sb.rpc("admin_rider_miles")]);
   areas = ac.data ?? []; liveRides = lr.data ?? [];
+  riderMiles = Object.fromEntries((rm.data ?? []).map((x) => [x.user_id, x])); // curvy-road miles and drives per rider
   members = mb.data ?? []; planReqs = pr.data ?? []; clubs = cl.data ?? []; rallies = ra.data ?? []; threads = th.data ?? []; messages = ms.data ?? []; invites = iv.data ?? [];
   if (o.error || !o.data) { gate("This account isn't on the admins list (or the admin migration hasn't been run)."); await sb.auth.signOut(); return false; }
   // screenshots riders attached: private files, opened here with links that last an hour
@@ -182,7 +186,9 @@ function render() {
   const online = profiles.filter((p) => p.last_seen_at && Date.now() - new Date(p.last_seen_at) < ONLINE_MIN * 60000);
   const byUser = (id) => profiles.find((p) => p.id === id);
   const label = (p) => p?.display_name || p?.email?.split("@")[0] || "Rider";
-  const tiles = [["Online now", overview.online, "var(--go)"], ["Driving now", overview.driving_now, "var(--a)"], ["Seen today", overview.today, "var(--sign)"], ["Riders", overview.riders, "var(--text)"], ["New reports", overview.new_reports, "var(--b)"], ["Drives today", overview.drives_today, "var(--go)"], ["Drives total", overview.drives, "var(--muted)"]];
+  const totalMi = Object.values(riderMiles).reduce((a, x) => a + (x.miles || 0), 0);
+  const phones = profiles.reduce((a, p) => { if (p.platform === "ios") a.ios++; else if (p.platform === "android") a.android++; return a; }, { ios: 0, android: 0 });
+  const tiles = [["Online now", overview.online, "var(--go)"], ["Driving now", overview.driving_now, "var(--a)"], ["Seen today", overview.today, "var(--sign)"], ["Riders", overview.riders, "var(--text)"], ["New reports", overview.new_reports, "var(--b)"], ["Drives today", overview.drives_today, "var(--go)"], ["Drives total", overview.drives, "var(--muted)"], ["Miles driven", fmtMi(totalMi), "var(--a)"], ["iPhone · Android", `${phones.ios} · ${phones.android}`, "var(--text)"]];
   const shownUsers = profiles.filter((p) => !q || [p.display_name, p.email, p.car, p.driving_style, p.activity].join(" ").toLowerCase().includes(q));
   const sel = selected ? byUser(selected) : null;
   const selDrives = sel ? drives.filter((d) => d.user_id === sel.id) : [];
@@ -195,7 +201,7 @@ function render() {
     <section class="tiles">${tiles.map(([l, n, c]) => `<div class="tile" style="--c:${c}"><div class="n">${n ?? 0}</div><div class="l">${l}</div></div>`).join("")}</section>
     <div class="grid">
       <div class="card"><h2>Online now · what they're doing</h2><div class="list">
-        ${online.length ? online.map((p) => `<div class="row online"><div class="dot"></div><div><div class="name">${esc(label(p))}</div><div class="sub">${esc(p.activity || "in the app")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") : `<div class="empty">Nobody in the app right now. Presence updates once a minute while the app is open.</div>`}
+        ${online.length ? online.map((p) => `<div class="row online"><div class="dot"></div><div><div class="name">${esc(label(p))}</div><div class="sub">${esc([device(p), p.activity || "in the app"].filter(Boolean).join(" · "))}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") : `<div class="empty">Nobody in the app right now. Presence updates once a minute while the app is open.</div>`}
       </div></div>
       <div class="card"><h2>Riders by area · last 30 days</h2>
         <div class="sub">No names. Each dot is an area about 17 miles across; areas with fewer than 3 riders are hidden. There is no precise location of anyone.</div>
@@ -237,8 +243,8 @@ function render() {
       </div></div>
     </div>
     <div class="grid">
-      <div class="card"><h2>Squad · members &amp; plans</h2>
-        <div class="sub" style="margin-bottom:8px">Plans set the squad size: free 3 · premium 10 · club 30 · rally 50. New plan requests: <b style="color:var(--a)">${planReqs.filter((r) => r.status === "new").length}</b></div>
+      <div class="card"><h2>Crew · members &amp; plans</h2>
+        <div class="sub" style="margin-bottom:8px">Plans set the crew size: free 3 · premium 10 · club 30 · rally 50. New plan requests: <b style="color:var(--a)">${planReqs.filter((r) => r.status === "new").length}</b></div>
         <div class="list">${planReqs.filter((r) => r.status === "new").map((r) => `<div class="row" style="grid-template-columns:1fr auto auto" data-pr="${r.id}" data-user="${r.user_id}" data-plan="${esc(r.plan)}">
           <div><div class="name">${esc(label(byUser(r.user_id)))} <span class="pill" style="--c:var(--sign)">wants ${esc(r.plan)}</span></div><div class="sub">${when(r.created_at)}${r.note ? ` · ${esc(r.note)}` : ""}</div></div>
           <button class="primary" data-grant>Grant ${esc(r.plan)}</button><button data-dismiss>Dismiss</button></div>`).join("")}</div>
@@ -249,13 +255,13 @@ function render() {
           <button data-togglesearch title="Flip whether this member can be found by username">${m.searchable ? "Hide" : "Show"}</button>
         </div>`).join("")}</div>
       </div>
-      <div class="card"><h2>Squad · clubs, rallies &amp; invites</h2>
+      <div class="card"><h2>Crew · clubs, rallies &amp; invites</h2>
         <div class="list">${clubs.map((c) => `<div class="row" style="grid-template-columns:auto 1fr"><span style="font-size:22px">${esc(c.logo || "🏁")}</span><div><div class="name">${esc(c.name)} <span class="sub">@${esc(c.slug)}</span></div><div class="sub">owner ${esc(label(byUser(c.owner)))} · ${when(c.created_at)}${c.about ? ` · ${esc(c.about)}` : ""}</div></div></div>`).join("") || `<div class="empty">No clubs yet.</div>`}</div>
         <div class="list" style="margin-top:10px">${rallies.map((r) => `<div class="row" style="grid-template-columns:auto 1fr"><span style="font-size:22px">🚗</span><div><div class="name">${esc(r.name)}</div><div class="sub">manager ${esc(label(byUser(r.owner)))} · ${when(r.created_at)}${r.about ? ` · ${esc(r.about)}` : ""}</div></div></div>`).join("") || `<div class="empty">No rallies yet.</div>`}</div>
         <div class="list" style="margin-top:10px">${invites.slice(0, 30).map((i) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(i.email)}</div><div class="sub">invited by ${esc(label(byUser(i.from_user)))} · ${when(i.created_at)}</div></div><span class="pill" style="--c:${i.status === "accepted" ? "var(--go)" : "var(--muted)"}">${esc(i.status)}</span></div>`).join("") || `<div class="empty">No email invites yet.</div>`}</div>
       </div>
     </div>
-    <div class="card"><h2>Squad · chats (latest ${messages.length} messages)</h2>
+    <div class="card"><h2>Crew · chats (latest ${messages.length} messages)</h2>
       <div class="list">${messages.map((m) => { const t = threads.find((x) => x.id === m.thread_id); return `<div class="row" style="grid-template-columns:1fr auto auto" data-msg="${m.id}">
         <div><div class="name">${esc(label(byUser(m.user_id)))} <span class="pill" style="--c:${m.kind === "route" ? "var(--a)" : m.kind === "challenge" ? "var(--sign)" : m.kind === "result" ? "var(--go)" : "var(--muted)"}">${esc(m.kind)}</span> <span class="sub">in ${esc(t?.name || (t?.kind === "dm" ? "a 1:1 chat" : `thread #${m.thread_id}`))}</span></div><div class="msg">${esc(m.body)}</div></div>
         <span class="mono">${when(m.created_at)}</span><button data-msgdel>Remove</button></div>`; }).join("") || `<div class="empty">No messages yet.</div>`}</div>
@@ -263,11 +269,11 @@ function render() {
     <div class="grid">
       <div class="card"><h2>Riders</h2>
         <div class="tools"><input id="q" placeholder="Search name, email, car, style" value="${esc(q)}"></div>
-        <div class="list">${shownUsers.map((p) => `<div class="row user" data-u="${p.id}"><div><div class="name">${esc(label(p))} <span class="sub">${esc(p.email || "")}</span></div><div class="sub">${[p.car, p.driving_style, p.activity].filter(Boolean).map(esc).join(" · ")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") || `<div class="empty">No riders yet.</div>`}</div>
+        <div class="list">${shownUsers.map((p) => `<div class="row user" data-u="${p.id}"><div><div class="name">${esc(label(p))} <span class="sub">${esc(p.email || "")}</span></div><div class="sub">${[device(p), milesOf(p.id) ? `${fmtMi(milesOf(p.id))} mi driven` : "", p.car, p.driving_style, p.activity].filter(Boolean).map(esc).join(" · ")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") || `<div class="empty">No riders yet.</div>`}</div>
       </div>
       <div class="card"><h2>Rider card</h2>${sel ? `<div class="profile">
         <div class="pcard"><div class="avatar">${esc(label(sel).slice(0, 1).toUpperCase())}</div><div><div class="name" style="font-size:20px">${esc(label(sel))}</div><div class="sub">${esc(sel.email || "")}</div><div class="sub">${[sel.car, sel.driving_style].filter(Boolean).map(esc).join(" · ") || "Profile not finished"}</div></div></div>
-        <div class="kv"><b>Last seen</b><span>${ago(sel.last_seen_at)}${sel.activity ? ` · ${esc(sel.activity)}` : ""}</span><b>Avatar</b><span>${esc(sel.avatar?.look || sel.avatar?.preset || "custom")}</span><b>Shares drives</b><span>${sel.share_drives ? "yes" : "no"}</span><b>Shares presence</b><span>${sel.share_presence ? "yes" : "no"}</span><b>Terms</b><span>${sel.terms_version ? `v${sel.terms_version} · ${when(sel.consented_at)}` : "not accepted"}</span><b>App</b><span>${esc(sel.app_version || "")}</span><b>Profile updated</b><span>${when(sel.updated_at)}</span></div>
+        <div class="kv"><b>Last seen</b><span>${ago(sel.last_seen_at)}${sel.activity ? ` · ${esc(sel.activity)}` : ""}</span><b>Phone</b><span>${esc(device(sel) || "not reported yet")}${sel.app_version ? ` · app ${esc(sel.app_version)}` : ""}</span><b>Miles driven</b><span>${fmtMi(milesOf(sel.id))} mi on curvy roads · ${riderMiles[sel.id]?.runs ?? 0} drives</span><b>Avatar</b><span>${esc(sel.avatar?.look || sel.avatar?.preset || "custom")}</span><b>Shares drives</b><span>${sel.share_drives ? "yes" : "no"}</span><b>Shares presence</b><span>${sel.share_presence ? "yes" : "no"}</span><b>Terms</b><span>${sel.terms_version ? `v${sel.terms_version} · ${when(sel.consented_at)}` : "not accepted"}</span><b>App</b><span>${esc(sel.app_version || "")}</span><b>Profile updated</b><span>${when(sel.updated_at)}</span></div>
         <div><h2>Drives (${selDrives.length})</h2><div class="list">${selDrives.slice(0, 40).map((d) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(d.road_name || d.road_id)}</div><div class="sub">${when(d.at)}</div></div><div class="mono">${d.miles} mi · ${clock(d.seconds)}${d.max_g ? ` · ${d.max_g} g` : ""}</div></div>`).join("") || `<div class="empty">No drives synced.</div>`}</div></div>
         <div><h2>Friends (${selFriends.length})</h2><div class="list">${selFriends.map((f) => { const o = byUser(f.user_id === sel.id ? f.friend_id : f.user_id); return `<div class="row" style="grid-template-columns:1fr auto"><div class="name">${esc(label(o))}</div><span class="pill" style="--c:${f.status === "accepted" ? "var(--go)" : "var(--muted)"}">${esc(f.status)}</span></div>`; }).join("") || `<div class="empty">No friends yet.</div>`}</div></div>
         <div><h2>Their reports (${selReports.length})</h2><div class="list">${selReports.map((r) => `<div class="row" style="grid-template-columns:1fr"><div class="sub">${esc(r.kind)} · ${when(r.created_at)} · ${esc(r.status)}</div><div>${esc(r.message)}</div></div>`).join("") || `<div class="empty">None.</div>`}</div></div>
