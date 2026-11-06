@@ -86,7 +86,7 @@ const HZ = { police: "🚓", object: "📦", construction: "🚧", pothole: "�
 if (!window.JOYRIDE_ADMIN) { $("#app").innerHTML = `<div class="gate"><h1>Joyride Admin</h1><p class="err">admin/config.js is missing. Copy config.example.js to config.js and fill in the project URL and anon key.</p></div>`; throw new Error("no config"); }
 const sb = supabase.createClient(JOYRIDE_ADMIN.url, JOYRIDE_ADMIN.anonKey);
 
-let shotUrls = {}, riderMiles = {};
+let shotUrls = {}, riderMiles = {}, roles = {};
 const device = (p) => (p.platform === "ios" ? "iPhone" : p.platform === "android" ? "Android" : "");
 const milesOf = (id) => riderMiles[id]?.miles ?? 0;
 const fmtMi = (m) => (m >= 100 ? Math.round(m).toLocaleString() : m.toFixed(1));
@@ -159,7 +159,8 @@ async function load() {
     sb.from("invites").select("*").order("created_at", { ascending: false }).limit(200),
   ]);
   // safe summaries only: riders by area (no names, small areas hidden) and live Joyride 2GTHR rides
-  const [ac, lr, rm] = await Promise.all([sb.rpc("admin_area_counts", { p_days: 30 }), sb.rpc("admin_live_rides"), sb.rpc("admin_rider_miles")]);
+  const [ac, lr, rm, rl] = await Promise.all([sb.rpc("admin_area_counts", { p_days: 30 }), sb.rpc("admin_live_rides"), sb.rpc("admin_rider_miles"), sb.rpc("admin_roles")]);
+  roles = Object.fromEntries((rl.data ?? []).map((x) => [x.email, x.role])); // admins and moderators, by email
   areas = ac.data ?? []; liveRides = lr.data ?? [];
   riderMiles = Object.fromEntries((rm.data ?? []).map((x) => [x.user_id, x])); // curvy-road miles and drives per rider
   members = mb.data ?? []; planReqs = pr.data ?? []; clubs = cl.data ?? []; rallies = ra.data ?? []; threads = th.data ?? []; messages = ms.data ?? []; invites = iv.data ?? [];
@@ -186,6 +187,7 @@ function render() {
   const online = profiles.filter((p) => p.last_seen_at && Date.now() - new Date(p.last_seen_at) < ONLINE_MIN * 60000);
   const byUser = (id) => profiles.find((p) => p.id === id);
   const label = (p) => p?.display_name || p?.email?.split("@")[0] || "Rider";
+  const roleOf = (p) => roles[(p?.email || "").toLowerCase()] || "rider";
   const totalMi = Object.values(riderMiles).reduce((a, x) => a + (x.miles || 0), 0);
   const phones = profiles.reduce((a, p) => { if (p.platform === "ios") a.ios++; else if (p.platform === "android") a.android++; return a; }, { ios: 0, android: 0 });
   const tiles = [["Online now", overview.online, "var(--go)"], ["Driving now", overview.driving_now, "var(--a)"], ["Seen today", overview.today, "var(--sign)"], ["Riders", overview.riders, "var(--text)"], ["New reports", overview.new_reports, "var(--b)"], ["Drives today", overview.drives_today, "var(--go)"], ["Drives total", overview.drives, "var(--muted)"], ["Miles driven", fmtMi(totalMi), "var(--a)"], ["iPhone · Android", `${phones.ios} · ${phones.android}`, "var(--text)"]];
@@ -269,10 +271,11 @@ function render() {
     <div class="grid">
       <div class="card"><h2>Riders</h2>
         <div class="tools"><input id="q" placeholder="Search name, email, car, style" value="${esc(q)}"></div>
-        <div class="list">${shownUsers.map((p) => `<div class="row user" data-u="${p.id}"><div><div class="name">${esc(label(p))} <span class="sub">${esc(p.email || "")}</span></div><div class="sub">${[device(p), milesOf(p.id) ? `${fmtMi(milesOf(p.id))} mi driven` : "", p.car, p.driving_style, p.activity].filter(Boolean).map(esc).join(" · ")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") || `<div class="empty">No riders yet.</div>`}</div>
+        <div class="list">${shownUsers.map((p) => `<div class="row user" data-u="${p.id}"><div><div class="name">${esc(label(p))} ${roleOf(p) !== "rider" ? `<span class="pill" style="--c:${roleOf(p) === "admin" ? "var(--a)" : "var(--go)"}">${roleOf(p)}</span> ` : ""}<span class="sub">${esc(p.email || "")}</span></div><div class="sub">${[device(p), milesOf(p.id) ? `${fmtMi(milesOf(p.id))} mi driven` : "", p.car, p.driving_style, p.activity].filter(Boolean).map(esc).join(" · ")}</div></div><div class="mono">${ago(p.last_seen_at)}</div></div>`).join("") || `<div class="empty">No riders yet.</div>`}</div>
       </div>
       <div class="card"><h2>Rider card</h2>${sel ? `<div class="profile">
         <div class="pcard"><div class="avatar">${esc(label(sel).slice(0, 1).toUpperCase())}</div><div><div class="name" style="font-size:20px">${esc(label(sel))}</div><div class="sub">${esc(sel.email || "")}</div><div class="sub">${[sel.car, sel.driving_style].filter(Boolean).map(esc).join(" · ") || "Profile not finished"}</div></div></div>
+        <div class="tools" data-roleu="${sel.id}"><b>Role</b> <select data-rolepick>${["rider", "moderator", "admin"].map((r) => `<option value="${r}" ${roleOf(sel) === r ? "selected" : ""}>${{ rider: "Rider", moderator: "Moderator: can edit roads in the app", admin: "Admin: this back office" }[r]}</option>`).join("")}</select> <button data-roleset>Save role</button></div>
         <div class="kv"><b>Last seen</b><span>${ago(sel.last_seen_at)}${sel.activity ? ` · ${esc(sel.activity)}` : ""}</span><b>Phone</b><span>${esc(device(sel) || "not reported yet")}${sel.app_version ? ` · app ${esc(sel.app_version)}` : ""}</span><b>Miles driven</b><span>${fmtMi(milesOf(sel.id))} mi on curvy roads · ${riderMiles[sel.id]?.runs ?? 0} drives</span><b>Avatar</b><span>${esc(sel.avatar?.look || sel.avatar?.preset || "custom")}</span><b>Shares drives</b><span>${sel.share_drives ? "yes" : "no"}</span><b>Shares presence</b><span>${sel.share_presence ? "yes" : "no"}</span><b>Terms</b><span>${sel.terms_version ? `v${sel.terms_version} · ${when(sel.consented_at)}` : "not accepted"}</span><b>App</b><span>${esc(sel.app_version || "")}</span><b>Profile updated</b><span>${when(sel.updated_at)}</span></div>
         <div><h2>Drives (${selDrives.length})</h2><div class="list">${selDrives.slice(0, 40).map((d) => `<div class="row" style="grid-template-columns:1fr auto"><div><div class="name">${esc(d.road_name || d.road_id)}</div><div class="sub">${when(d.at)}</div></div><div class="mono">${d.miles} mi · ${clock(d.seconds)}${d.max_g ? ` · ${d.max_g} g` : ""}</div></div>`).join("") || `<div class="empty">No drives synced.</div>`}</div></div>
         <div><h2>Friends (${selFriends.length})</h2><div class="list">${selFriends.map((f) => { const o = byUser(f.user_id === sel.id ? f.friend_id : f.user_id); return `<div class="row" style="grid-template-columns:1fr auto"><div class="name">${esc(label(o))}</div><span class="pill" style="--c:${f.status === "accepted" ? "var(--go)" : "var(--muted)"}">${esc(f.status)}</span></div>`; }).join("") || `<div class="empty">No friends yet.</div>`}</div></div>
@@ -303,6 +306,11 @@ function render() {
   document.querySelectorAll("[data-dismiss]").forEach((b) => b.onclick = async () => {
     const row = b.closest("[data-pr]"); b.disabled = true;
     const { error } = await sb.from("plan_requests").update({ status: "dismissed" }).eq("id", row.dataset.pr);
+    if (error) alert(error.message); await refresh();
+  });
+  document.querySelectorAll("[data-roleset]").forEach((b) => b.onclick = async () => {
+    const row = b.closest("[data-roleu]"); b.disabled = true;
+    const { error } = await sb.rpc("admin_set_role", { p_user: row.dataset.roleu, p_role: row.querySelector("[data-rolepick]").value });
     if (error) alert(error.message); await refresh();
   });
   document.querySelectorAll("[data-planset]").forEach((b) => b.onclick = async () => {
